@@ -1,0 +1,79 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+/**
+ * The Hack Central Processing unit (CPU).
+ * Parses the binary code in the instruction input and executes it according to the
+ * Hack machine language specification. In the case of a C-instruction, computes the
+ * function specified by the instruction. If the instruction specifies to read a memory
+ * value, the inM input is expected to contain this value. If the instruction specifies
+ * to write a value to the memory, sets the outM output to this value, sets the addressM
+ * output to the target address, and asserts the writeM output (when writeM == 0, any
+ * value may appear in outM).
+ * If the reset input is 0, computes the address of the next instruction and sets the
+ * pc output to that value. If the reset input is 1, sets pc to 0.
+ * Note: The outM and writeM outputs are combinational: they are affected by the
+ * instruction's execution during the current cycle. The addressM and pc outputs are
+ * clocked: although they are affected by the instruction's execution, they commit to
+ * their new values only in the next cycle.
+ */
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to restart the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // Address of next instruction
+
+    PARTS:
+	And (a=instruction[3], b=instruction[15], out=writeM); // writeM = instruction[3]
+	
+	// A register
+	Not (in=instruction[15], out=notc);
+	Or (a=notc, b=instruction[5], out=loadA);
+	Mux16 (a=instruction, b=ALUout, sel=instruction[15], out=Adata);
+    ARegister (in=Adata, load=loadA, out=A, out[0..14]=addressM);
+	
+	// D register
+	And (a=instruction[4], b=instruction[15], out=loadD);
+	DRegister (in=ALUout, load=loadD, out=D);
+	
+	// ALU logic
+	Mux16 (a=A, b=inM, sel=instruction[12], out=AorM);
+	ALU (x=D, y=AorM, zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=ALUout, out=outM, zr=ALUzr, ng=ALUng);
+	
+	// GOTO and reset logic
+	Or (a=ALUng, b=ALUzr, out=ALUnegOrZr);
+	Not (in=ALUnegOrZr, out=ALUpos);
+	And (a=instruction[0], b=ALUpos, out=JGT);
+	And (a=instruction[1], b=ALUzr, out=JEQ);
+	And (a=instruction[2], b=ALUng, out=JLT);
+	And (a=instruction[2], b=instruction[1], out=JMPtemp);
+    And (a=JMPtemp, b=instruction[0], out=JMP);
+	
+	Or (a=JGT, b=JLT, out=loadPC1);
+	Or (a=JEQ, b=JMP, out=loadPC2);
+	Or (a=loadPC1, b=loadPC2, out=loadPCtemp);
+	And (a=loadPCtemp, b=instruction[15], out=loadPC);
+	Or (a=reset, b=loadPC, out=notInc);
+	Not (in=notInc, out=inc);
+	PC (in=A, inc=inc, load=loadPC, reset=reset, out[0..14]=pc);
+}
+
+
+// instruction 0: A if 0, C if 1
+
+// if A, all remaining bits are an integer value to be loaded into A
+// if C, they are the following:
+
+// 3-9: ALU control bits
+// 10: Store ALU output in A?
+// 11: Store ALU output in D?
+// 12: Load ALU output to RAM[A]?
+// 13-15: GOTO control
